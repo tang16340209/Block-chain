@@ -1,0 +1,228 @@
+contract Utils {
+    function Utils() public{
+    }
+    modifier greaterThanZero(uint256 _amount) {
+        require(_amount > 0);
+        _;
+    }
+    modifier validAddress(address _address) {
+        require(_address != 0x0);
+        _;
+    }
+    modifier notThis(address _address) {
+        require(_address != address(this));
+        _;
+    }
+    function safeAdd(uint256 _x, uint256 _y) internal pure returns (uint256) {
+        uint256 z = _x + _y;
+        assert(z >= _x);
+        return z;
+    }
+    function safeSub(uint256 _x, uint256 _y) internal pure returns (uint256) {
+        assert(_x >= _y);
+        return _x - _y;
+    }
+    function safeMul(uint256 _x, uint256 _y) internal pure returns (uint256) {
+        uint256 z = _x * _y;
+        assert(_x == 0 || z / _x == _y);
+        return z;
+    }
+}
+contract ERC20Token, Utils {
+    string public name = '';
+    string public symbol = '';
+    uint8 public decimals = 0;
+    uint256 public totalSupply = 0;
+    mapping (address => uint256) public balanceOf;
+    mapping (address => mapping (address => uint256)) public allowance;
+
+    event Transfer(address indexed _from, address indexed _to, uint256 _value);
+    event Approval(address indexed _owner, address indexed _spender, uint256 _value);
+
+    function ERC20Token(string _name, string _symbol, uint8 _decimals) public{
+        //检验参数的合法性
+        require(bytes(_name).length > 0 && bytes(_symbol).length > 0); 
+
+        name = _name;
+        symbol = _symbol;
+        decimals = _decimals;
+    }
+
+    function transfer(address _to, uint256 _value)public
+        validAddress(_to)
+        returns (bool success)
+    {
+        balanceOf[msg.sender] = safeSub(balanceOf[msg.sender], _value);
+        balanceOf[_to] = safeAdd(balanceOf[_to], _value);
+        emit Transfer(msg.sender, _to, _value);
+        return true;
+    }
+
+    function transferFrom(address _from, address _to, uint256 _value)
+        public
+        validAddress(_from)
+        validAddress(_to)
+        returns (bool success)
+    {
+        allowance[_from][msg.sender] = safeSub(allowance[_from][msg.sender], _value);
+        balanceOf[_from] = safeSub(balanceOf[_from], _value);
+        balanceOf[_to] = safeAdd(balanceOf[_to], _value);
+        emit Transfer(_from, _to, _value);
+        return true;
+    }
+
+    function approve(address _spender, uint256 _value)
+        public
+        validAddress(_spender)
+        returns (bool success)
+    {
+        require(_value == 0 || allowance[msg.sender][_spender] == 0);
+
+        allowance[msg.sender][_spender] = _value;
+        emit Approval(msg.sender, _spender, _value);
+        return true;
+    }
+}
+//一般来说，数据合约要继承这个基类
+contract Owned{
+    address public owner;
+    address public newOwner;
+
+    event OwnerUpdate(address _prevOwner, address _newOwner);
+
+    function Owned() public{
+        owner = msg.sender;
+    }
+
+    modifier ownerOnly {
+        assert(msg.sender == owner);
+        _;
+    }
+
+    function transferOwnership(address _newOwner) public ownerOnly {
+        require(_newOwner != owner);
+        newOwner = _newOwner;
+    }
+
+    function acceptOwnership() public {
+        require(msg.sender == newOwner);
+        owner = newOwner;
+        newOwner = 0x0;
+        emit OwnerUpdate(owner, newOwner);
+    }
+}
+
+//一般来说，控制合约要继承这个基类
+contract Owner{
+    address public creator;
+    address public ownedDataContract;
+    Owned   public dataContract;
+
+    //_dataContract must be specified when creating the owner contract.
+    function Owner(Owned _dataContract) public{
+        assert(address(_dataContract) != address(0));
+        creator = msg.sender;
+        dataContract = _dataContract;
+    }
+
+    modifier creatorOnly{
+        assert(msg.sender == creator);
+        _;
+    }
+
+    function transferTokenOwnership(address _newOwner) public creatorOnly {
+        dataContract.transferOwnership(_newOwner);
+    }
+
+    function acceptTokenOwnership() public creatorOnly {
+        dataContract.acceptOwnership();
+    }
+}
+
+contract SmartToken is Owned, ERC20Token {
+    event NewSmartToken(address _token);
+    event Issuance(uint256 _amount);
+    event Destruction(uint256 _amount);
+
+    function SmartToken(string _name, string _symbol, uint8 _decimals)
+        ERC20Token(_name, _symbol, _decimals) public
+    {
+        emit NewSmartToken(address(this));
+    }
+
+    //只有数据合约的owner才有资格使用issue方法给某个账户发行一定数量的token
+    function issue(address _to, uint256 _amount)
+        public
+        ownerOnly
+        validAddress(_to)
+        notThis(_to)
+    {
+        totalSupply = safeAdd(totalSupply, _amount);
+        balanceOf[_to] = safeAdd(balanceOf[_to], _amount);
+
+        emit Issuance(_amount);
+        Transfer(this, _to, _amount);
+    }
+
+    function destroy(address _from, uint256 _amount) public {
+        require(msg.sender == _from || msg.sender == owner); // validate input
+
+        balanceOf[_from] = safeSub(balanceOf[_from], _amount);
+        totalSupply = safeSub(totalSupply, _amount);
+
+        emit Transfer(_from, this, _amount);
+        emit Destruction(_amount);
+    }
+}
+
+contract SmartToken is Owned, ERC20Token {
+    event NewSmartToken(address _token);
+    event Issuance(uint256 _amount);
+    event Destruction(uint256 _amount);
+
+    function SmartToken(string _name, string _symbol, uint8 _decimals)
+        ERC20Token(_name, _symbol, _decimals) public
+    {
+        emit NewSmartToken(address(this));
+    }
+
+    //只有数据合约的owner才有资格使用issue方法给某个账户发行一定数量的token
+    function issue(address _to, uint256 _amount)
+        public
+        ownerOnly
+        validAddress(_to)
+        notThis(_to)
+    {
+        totalSupply = safeAdd(totalSupply, _amount);
+        balanceOf[_to] = safeAdd(balanceOf[_to], _amount);
+
+        emit Issuance(_amount);
+        Transfer(this, _to, _amount);
+    }
+
+    function destroy(address _from, uint256 _amount) public {
+        require(msg.sender == _from || msg.sender == owner); // validate input
+
+        balanceOf[_from] = safeSub(balanceOf[_from], _amount);
+        totalSupply = safeSub(totalSupply, _amount);
+
+        emit Transfer(_from, this, _amount);
+        emit Destruction(_amount);
+    }
+}
+
+contract CrowdContract is Owner, Utils{
+    address public tokenAddr;
+
+    function CrowdContract(address token) Owner(Owned(token)) public{
+        tokenAddr = token;
+    }
+    function HandleContribute(address to, uint256 amount){
+        //假设我们众筹阶段，按照1:1000的比例收取eth。假设A给此合约转账3个eth，则发行3000个MTC给A账户
+        SmartToken mtToken = SmartToken (tokenAddr);
+        mtToken.issue(msg.sender, amount * 1000);
+    }
+    function() public payable{
+        HandleContribute(msg.sender, msg.value);
+    }
+}
